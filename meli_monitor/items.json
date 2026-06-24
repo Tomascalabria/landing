@@ -1,0 +1,12 @@
+[
+  {
+    "id": "MLA1234567890",
+    "label": "Ejemplo producto 1",
+    "seller": "Vendedor A"
+  },
+  {
+    "id": "MLA9876543210",
+    "label": "Ejemplo producto 2",
+    "seller": "Vendedor B"
+  }
+]
