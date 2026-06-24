@@ -225,6 +225,11 @@
 <main>
 
   <!-- Add form -->
+  <div id="api-error" style="display:none;background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:.9rem 1.2rem;margin-bottom:1rem;color:#991b1b;font-size:.875rem">
+    <strong>Error al conectar con la API de MercadoLibre.</strong>
+    Revisá tu conexión o intentá de nuevo. Detalle: <span id="api-error-msg"></span>
+  </div>
+
   <div class="add-card">
     <h2>Agregar publicación</h2>
     <div class="add-form">
@@ -354,8 +359,16 @@ function toast(msg) {
 
 async function fetchItem(id) {
   const r = await fetch(`https://api.mercadolibre.com/items/${id}`);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status} para ${id}`);
   return r.json();
+}
+
+function showApiError(msg) {
+  document.getElementById('api-error').style.display = 'block';
+  document.getElementById('api-error-msg').textContent = msg;
+}
+function hideApiError() {
+  document.getElementById('api-error').style.display = 'none';
 }
 
 async function fetchSellerNick(sellerId) {
@@ -411,10 +424,12 @@ async function refreshAll() {
   const btn = document.getElementById('btn-refresh');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>Actualizando...';
+  hideApiError();
 
   const lastPrices = getPrices();
   const history    = getHistory();
   const now        = new Date().toISOString();
+  let anyError     = null;
 
   await Promise.allSettled(items.map(async (item) => {
     try {
@@ -456,6 +471,7 @@ async function refreshAll() {
         checkedAt: now,
       };
     } catch (e) {
+      anyError = e.message;
       lastPrices[item.id] = { ...(lastPrices[item.id] || {}), error: true, checkedAt: now };
     }
   }));
@@ -471,6 +487,7 @@ async function refreshAll() {
   btn.innerHTML = 'Actualizar precios';
   document.getElementById('last-updated').textContent =
     'Últ. actualización: ' + fmtDate(now);
+  if (anyError) showApiError(anyError);
 }
 
 // ── Render table ──────────────────────────────────────────────────────────────
