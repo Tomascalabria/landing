@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
 Monitor de precios de MercadoLibre.
-Lee IDs de publicaciones desde items.json y muestra/guarda los precios actuales.
 
-Uso:
-    python monitor.py               # muestra tabla en consola
-    python monitor.py --csv         # exporta a prices_YYYYMMDD_HHMMSS.csv
-    python monitor.py --watch 60    # revisa cada 60 segundos y alerta cambios
+Modos:
+    python monitor.py                  # tabla en consola (snapshot)
+    python monitor.py --csv            # exporta snapshot a CSV
+    python monitor.py --watch 60       # loop: detecta cambios cada 60s, imprime en consola
+    python monitor.py --sheets         # one-shot: detecta cambios y los registra en Google Sheets
 
-Variables de entorno para Telegram (opcional):
-    TELEGRAM_TOKEN   Token del bot (de @BotFather)
-    TELEGRAM_CHAT_ID ID del chat donde mandar alertas
+Variables de entorno:
+    GOOGLE_CREDENTIALS_JSON   Contenido del JSON de la cuenta de servicio de Google
+    SPREADSHEET_ID            ID del Google Sheet (el tramo largo de la URL)
 """
 
 import argparse
@@ -29,32 +29,15 @@ try:
 except ImportError:
     pass
 
-MELI_API = "https://api.mercadolibre.com/items"
-BATCH_SIZE = 20  # ML permite hasta 20 IDs por request
+MELI_API   = "https://api.mercadolibre.com/items"
+BATCH_SIZE = 20
 ITEMS_FILE = os.path.join(os.path.dirname(__file__), "items.json")
+STATE_FILE = os.path.join(os.path.dirname(__file__), ".last_prices.json")
 
-
-# ── Telegram ──────────────────────────────────────────────────────────────────
-
-def _tg_token() -> str | None:
-    return os.environ.get("TELEGRAM_TOKEN")
-
-def _tg_chat() -> str | None:
-    return os.environ.get("TELEGRAM_CHAT_ID")
-
-def send_telegram(text: str) -> None:
-    token = _tg_token()
-    chat  = _tg_chat()
-    if not token or not chat:
-        return
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat, "text": text, "parse_mode": "HTML"},
-            timeout=10,
-        )
-    except requests.RequestException:
-        pass  # no interrumpir el monitor si Telegram falla
+SHEET_HEADERS = [
+    "Fecha detección", "ID publicación", "Vendedor", "Producto",
+    "Precio anterior", "Precio nuevo", "Diferencia $", "Diferencia %", "URL",
+]
 
 
 # ── API MercadoLibre ──────────────────────────────────────────────────────────
@@ -74,41 +57,71 @@ def fetch_prices(ids: list[str]) -> dict[str, dict]:
             if entry.get("code") == 200:
                 item = entry["body"]
                 results[item["id"]] = {
-                    "title": item.get("title", ""),
-                    "price": item.get("price"),
+                    "title":          item.get("title", ""),
+                    "price":          item.get("price"),
                     "original_price": item.get("original_price"),
-                    "currency": item.get("currency_id", "ARS"),
-                    "condition": item.get("condition", ""),
-                    "status": item.get("status", ""),
-                    "permalink": item.get("permalink", ""),
-                    "seller_id": item.get("seller_id"),
+                    "currency":       item.get("currency_id", "ARS"),
+                    "status":         item.get("status", ""),
+                    "permalink":      item.get("permalink", ""),
                 }
-            else:
-                results[batch[entry.get("code", 0) % len(batch)]] = None
     return results
+
+
+# ── Estado persistente (para --sheets y reinicio de --watch) ─────────────────
+
+def load_state() -> dict[str, float | None]:
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def save_state(prices: dict[str, float | None]) -> None:
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(prices, f)
 
 
 # ── Formato ───────────────────────────────────────────────────────────────────
 
-def format_price(amount, currency: str) -> str:
+def fmt_price(amount, currency: str) -> str:
     if amount is None:
         return "-"
     symbol = "$" if currency == "ARS" else currency + " "
     return f"{symbol}{amount:,.2f}"
 
 
-def discount_pct(price, original) -> str:
-    if not original or not price or original <= price:
-        return ""
-    pct = (1 - price / original) * 100
-    return f"  -{pct:.0f}%"
+def build_rows(items: list[dict], prices: dict[str, dict]) -> list[dict]:
+    rows = []
+    for item in items:
+        iid  = item["id"]
+        data = prices.get(iid)
+        if data is None:
+            rows.append({
+                "id": iid, "seller": item.get("seller", ""),
+                "label": item.get("label", ""), "title": "ID no encontrado",
+                "price": None, "original": None, "currency": "",
+                "status": "error", "permalink": "",
+            })
+        else:
+            rows.append({
+                "id":       iid,
+                "seller":   item.get("seller", ""),
+                "label":    item.get("label", ""),
+                "title":    data["title"],
+                "price":    data["price"],
+                "original": data["original_price"],
+                "currency": data["currency"],
+                "status":   data["status"],
+                "permalink":data["permalink"],
+            })
+    return rows
 
 
 def print_table(rows: list[dict]) -> None:
-    headers = ["ID", "Vendedor", "Título", "Precio", "Precio original", "Estado", "URL"]
-    col_w = [14, 14, 40, 18, 18, 10, 50]
+    headers = ["ID", "Vendedor", "Título", "Precio", "Precio original", "Estado"]
+    col_w   = [14, 14, 45, 18, 18, 10]
+    sep     = "+" + "+".join("-" * (w + 2) for w in col_w) + "+"
 
-    sep = "+" + "+".join("-" * (w + 2) for w in col_w) + "+"
     def row_fmt(cells):
         parts = []
         for cell, w in zip(cells, col_w):
@@ -120,144 +133,154 @@ def print_table(rows: list[dict]) -> None:
     print(row_fmt(headers))
     print(sep)
     for r in rows:
-        print(row_fmt([
-            r["id"],
-            r["seller"],
-            r["title"],
-            r["price_fmt"] + r["discount"],
-            r["original_fmt"],
-            r["status"],
-            r["permalink"],
-        ]))
+        orig = fmt_price(r["original"], r["currency"]) if r["original"] else "-"
+        print(row_fmt([r["id"], r["seller"], r["title"],
+                       fmt_price(r["price"], r["currency"]), orig, r["status"]]))
     print(sep)
 
 
-def build_rows(items: list[dict], prices: dict[str, dict]) -> list[dict]:
-    rows = []
-    for item in items:
-        iid = item["id"]
-        data = prices.get(iid)
-        if data is None:
-            rows.append({
-                "id": iid,
-                "seller": item.get("seller", ""),
-                "label": item.get("label", ""),
-                "title": "ID no encontrado",
-                "price": None,
-                "original": None,
-                "price_fmt": "-",
-                "original_fmt": "-",
-                "discount": "",
-                "status": "error",
-                "permalink": "",
-                "currency": "",
-            })
-        else:
-            rows.append({
-                "id": iid,
-                "seller": item.get("seller", ""),
-                "label": item.get("label", ""),
-                "title": data["title"],
-                "price": data["price"],
-                "original": data["original_price"],
-                "price_fmt": format_price(data["price"], data["currency"]),
-                "original_fmt": format_price(data["original_price"], data["currency"]),
-                "discount": discount_pct(data["price"], data["original_price"]),
-                "status": data["status"],
-                "permalink": data["permalink"],
-                "currency": data["currency"],
-            })
-    return rows
+# ── Google Sheets ─────────────────────────────────────────────────────────────
 
+def get_sheet():
+    import gspread
+    from google.oauth2.service_account import Credentials
+
+    creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+    if not creds_json:
+        raise RuntimeError("Falta la variable de entorno GOOGLE_CREDENTIALS_JSON")
+    spreadsheet_id = os.environ.get("SPREADSHEET_ID")
+    if not spreadsheet_id:
+        raise RuntimeError("Falta la variable de entorno SPREADSHEET_ID")
+
+    creds_dict = json.loads(creds_json)
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    creds  = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    gc     = gspread.authorize(creds)
+    sh     = gc.open_by_key(spreadsheet_id)
+
+    try:
+        ws = sh.worksheet("Historial")
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title="Historial", rows=1000, cols=len(SHEET_HEADERS))
+        ws.append_row(SHEET_HEADERS)
+
+    return ws
+
+
+def append_changes_to_sheet(ws, changes: list[dict]) -> None:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    rows = []
+    for c in changes:
+        prev    = c["prev_price"]
+        curr    = c["price"]
+        diff    = (curr - prev) if (curr is not None and prev is not None) else None
+        diff_pct = (diff / prev * 100) if (diff is not None and prev) else None
+        rows.append([
+            now,
+            c["id"],
+            c["seller"],
+            c["label"] or c["title"],
+            prev,
+            curr,
+            round(diff, 2)    if diff is not None else "",
+            round(diff_pct, 2) if diff_pct is not None else "",
+            c["permalink"],
+        ])
+    ws.append_rows(rows, value_input_option="USER_ENTERED")
+
+
+# ── CSV export ────────────────────────────────────────────────────────────────
 
 def export_csv(rows: list[dict]) -> str:
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = os.path.join(os.path.dirname(__file__), f"prices_{ts}.csv")
-    fieldnames = ["timestamp", "id", "label", "seller", "title", "price", "original_price",
-                  "currency", "discount_pct", "status", "permalink"]
+    fields   = ["timestamp", "id", "label", "seller", "title",
+                 "price", "original_price", "currency", "status", "permalink"]
     with open(filename, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
+        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        w.writeheader()
         for r in rows:
-            disc = ""
-            if r["original"] and r["price"] and r["original"] > r["price"]:
-                disc = f"{(1 - r['price'] / r['original']) * 100:.1f}"
-            writer.writerow({
-                "timestamp": ts,
-                "id": r["id"],
-                "label": r["label"],
-                "seller": r["seller"],
-                "title": r["title"],
-                "price": r["price"],
-                "original_price": r["original"],
-                "currency": r["currency"],
-                "discount_pct": disc,
-                "status": r["status"],
-                "permalink": r["permalink"],
-            })
+            w.writerow({**r, "timestamp": ts, "original_price": r["original"]})
     return filename
 
 
-# ── Watch mode ────────────────────────────────────────────────────────────────
+# ── Detección de cambios ──────────────────────────────────────────────────────
 
-def watch(items: list[dict], interval: int) -> None:
-    tg_active = bool(_tg_token() and _tg_chat())
-    print(f"Monitoreando {len(items)} publicaciones cada {interval}s.")
-    if tg_active:
-        print("Alertas Telegram: activadas")
-        send_telegram(
-            f"<b>Monitor MeLi iniciado</b>\n"
-            f"Vigilando {len(items)} publicaciones cada {interval}s."
-        )
-    print("Ctrl+C para salir.\n")
+def detect_changes(rows: list[dict], last: dict[str, float | None]) -> list[dict]:
+    changed = []
+    for r in rows:
+        iid  = r["id"]
+        curr = r["price"]
+        prev = last.get(iid, ...)
+        if prev is ...:
+            continue
+        if curr != prev:
+            changed.append({**r, "prev_price": prev})
+    return changed
 
-    last_prices: dict[str, float | None] = {}
+
+# ── Modos principales ─────────────────────────────────────────────────────────
+
+def run_sheets(items: list[dict]) -> None:
+    """One-shot: compara con precios anteriores y loguea cambios en Sheets."""
+    ids    = [i["id"] for i in items]
+    prices = fetch_prices(ids)
+    rows   = build_rows(items, prices)
+    last   = load_state()
+
+    changes = detect_changes(rows, last)
+
+    new_state = {r["id"]: r["price"] for r in rows}
+    save_state(new_state)
+
+    if not changes:
+        print(f"[{datetime.now():%H:%M:%S}] Sin cambios de precio.")
+        return
+
+    print(f"[{datetime.now():%H:%M:%S}] {len(changes)} cambio(s) detectado(s). Registrando en Sheets...")
+    ws = get_sheet()
+    append_changes_to_sheet(ws, changes)
+
+    for c in changes:
+        arrow = "▼" if (c["price"] or 0) < (c["prev_price"] or 0) else "▲"
+        print(f"  {arrow} {c['id']} | {c['seller']} | "
+              f"{fmt_price(c['prev_price'], c['currency'])} → "
+              f"{fmt_price(c['price'], c['currency'])}")
+
+    print("Listo.")
+
+
+def run_watch(items: list[dict], interval: int) -> None:
+    """Loop continuo: imprime cambios en consola."""
+    print(f"Monitoreando {len(items)} publicaciones cada {interval}s. Ctrl+C para salir.\n")
+    last: dict[str, float | None] = {}
 
     while True:
         ids = [i["id"] for i in items]
         try:
             prices = fetch_prices(ids)
         except requests.RequestException as e:
-            print(f"[{datetime.now():%H:%M:%S}] Error al consultar API: {e}")
+            print(f"[{datetime.now():%H:%M:%S}] Error API: {e}")
             time.sleep(interval)
             continue
 
-        rows = build_rows(items, prices)
-        changed = []
+        rows    = build_rows(items, prices)
+        changes = detect_changes(rows, last)
+
         for r in rows:
-            prev = last_prices.get(r["id"], ...)
-            curr = r["price"]
-            if prev is ...:
-                last_prices[r["id"]] = curr
-                continue
-            if curr != prev:
-                changed.append((r, prev))
-                last_prices[r["id"]] = curr
+            last[r["id"]] = r["price"]
 
         ts = datetime.now().strftime("%H:%M:%S")
-        if changed:
-            print(f"\n{'='*60}")
-            print(f"[{ts}]  CAMBIOS DETECTADOS")
-            print(f"{'='*60}")
-            tg_lines = ["<b>Cambio de precio en MeLi</b>"]
-            for r, prev in changed:
-                prev_fmt = format_price(prev, r["currency"])
-                curr_fmt = r["price_fmt"]
-                arrow = "▼" if (r["price"] or 0) < (prev or 0) else "▲"
-                print(f"  {arrow} {r['id']}  {r['title'][:40]}")
-                print(f"     Vendedor: {r['seller']}")
-                print(f"     Precio:   {prev_fmt}  →  {curr_fmt}")
-                print(f"     URL:      {r['permalink']}")
-                tg_lines.append(
-                    f"\n{arrow} <b>{r['title'][:50]}</b>\n"
-                    f"Vendedor: {r['seller']}\n"
-                    f"Precio: {prev_fmt} → <b>{curr_fmt}</b>\n"
-                    f"<a href=\"{r['permalink']}\">Ver publicación</a>"
-                )
-            if tg_active:
-                send_telegram("\n".join(tg_lines))
+        if changes:
+            print(f"\n[{ts}] CAMBIOS:")
+            for c in changes:
+                arrow = "▼" if (c["price"] or 0) < (c["prev_price"] or 0) else "▲"
+                print(f"  {arrow} {c['id']} | {c['seller']} | {c['label'] or c['title'][:35]}")
+                print(f"      {fmt_price(c['prev_price'], c['currency'])} → "
+                      f"{fmt_price(c['price'], c['currency'])}")
+                print(f"      {c['permalink']}")
         else:
-            print(f"[{ts}]  Sin cambios. Próxima revisión en {interval}s.")
+            print(f"[{ts}] Sin cambios. Próxima revisión en {interval}s.")
 
         time.sleep(interval)
 
@@ -266,24 +289,29 @@ def watch(items: list[dict], interval: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monitor de precios MercadoLibre")
-    parser.add_argument("--items", default=ITEMS_FILE, help="Path al JSON con las publicaciones")
-    parser.add_argument("--csv", action="store_true", help="Exportar resultados a CSV")
-    parser.add_argument("--watch", type=int, metavar="SEGUNDOS",
-                        help="Monitorear en loop cada N segundos y alertar cambios")
+    parser.add_argument("--items",  default=ITEMS_FILE)
+    parser.add_argument("--csv",    action="store_true", help="Exportar snapshot a CSV")
+    parser.add_argument("--watch",  type=int, metavar="SEGUNDOS",
+                        help="Loop en consola cada N segundos")
+    parser.add_argument("--sheets", action="store_true",
+                        help="One-shot: detectar cambios y loguear en Google Sheets")
     args = parser.parse_args()
 
     if not os.path.exists(args.items):
-        print(f"Error: no se encontró el archivo de items: {args.items}")
-        print("Creá un items.json con el formato del ejemplo.")
+        print(f"Error: no se encontró {args.items}")
         sys.exit(1)
 
     items = load_items(args.items)
     if not items:
-        print("El archivo items.json está vacío.")
+        print("items.json está vacío.")
         sys.exit(1)
 
+    if args.sheets:
+        run_sheets(items)
+        return
+
     if args.watch:
-        watch(items, args.watch)
+        run_watch(items, args.watch)
         return
 
     ids = [i["id"] for i in items]
@@ -291,7 +319,7 @@ def main() -> None:
     try:
         prices = fetch_prices(ids)
     except requests.RequestException as e:
-        print(f"Error al consultar la API de MercadoLibre: {e}")
+        print(f"Error API: {e}")
         sys.exit(1)
 
     rows = build_rows(items, prices)
