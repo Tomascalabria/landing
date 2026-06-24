@@ -1,12 +1,5 @@
 [
-  {
-    "id": "MLA1234567890",
-    "label": "Ejemplo producto 1",
-    "seller": "Vendedor A"
-  },
-  {
-    "id": "MLA9876543210",
-    "label": "Ejemplo producto 2",
-    "seller": "Vendedor B"
-  }
+  { "id": "MLA3106516000",  "label": "", "seller": "" },
+  { "id": "MLA1729348221",  "label": "", "seller": "" },
+  { "id": "MLA2812761184",  "label": "", "seller": "" }
 ]

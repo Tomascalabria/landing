@@ -607,6 +607,14 @@ function exportHistory() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
+const DEFAULT_ITEMS = [
+  { id: 'MLA3106516000', label: '', seller: '', addedAt: new Date().toISOString() },
+  { id: 'MLA1729348221', label: '', seller: '', addedAt: new Date().toISOString() },
+  { id: 'MLA2812761184', label: '', seller: '', addedAt: new Date().toISOString() },
+];
+
+if (!getItems().length) saveItems(DEFAULT_ITEMS);
+
 renderTable();
 renderHistory();
 
@@ -617,8 +625,7 @@ if (firstKey) {
   if (last) document.getElementById('last-updated').textContent = 'Últ. actualización: ' + fmtDate(last);
 }
 
-// auto-refresh si hay items
-if (getItems().length) refreshAll();
+refreshAll();
 </script>
 </body>
 </html>
