@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monitor de Precios — MercadoLibre</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #f0f2f5;
+      --surface:  #ffffff;
+      --border:   #e0e4ea;
+      --text:     #1a1a2e;
+      --muted:    #6b7280;
+      --blue:     #3483fa;
+      --blue-dk:  #2968c8;
+      --yellow:   #ffe600;
+      --green:    #00a650;
+      --red:      #f23d4f;
+      --radius:   10px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--blue);
+      color: #fff;
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    }
+    header svg { flex-shrink: 0; }
+    header h1 { font-size: 1.25rem; font-weight: 700; }
+    header p  { font-size: .8rem; opacity: .8; margin-top: 2px; }
+    .header-actions { margin-left: auto; display: flex; gap: .5rem; }
+
+    /* ── Layout ── */
+    main { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1rem; }
+
+    /* ── Add form ── */
+    .add-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.2rem 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .add-card h2 { font-size: .9rem; font-weight: 600; color: var(--muted); margin-bottom: .8rem; text-transform: uppercase; letter-spacing: .05em; }
+    .add-form { display: flex; gap: .6rem; flex-wrap: wrap; }
+    .add-form input {
+      flex: 1; min-width: 200px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: .55rem .8rem;
+      font-size: .9rem;
+      outline: none;
+      transition: border-color .15s;
+    }
+    .add-form input:focus { border-color: var(--blue); }
+    .add-form input::placeholder { color: #aaa; }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: .55rem 1.1rem;
+      border-radius: 6px;
+      border: none;
+      font-size: .875rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s, opacity .15s;
+      white-space: nowrap;
+    }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-primary  { background: var(--blue); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--blue-dk); }
+    .btn-outline  { background: transparent; color: var(--blue); border: 1.5px solid var(--blue); }
+    .btn-outline:hover { background: #eef3ff; }
+    .btn-ghost    { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .btn-ghost:hover { background: #f5f5f5; }
+    .btn-sm { padding: .3rem .7rem; font-size: .78rem; }
+
+    /* ── Toolbar ── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+      gap: .5rem;
+    }
+    .toolbar-left  { display: flex; gap: .5rem; align-items: center; }
+    .toolbar-right { display: flex; gap: .5rem; }
+    #last-updated  { font-size: .78rem; color: var(--muted); }
+
+    /* ── Products table ── */
+    .table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 2rem;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      background: #f7f8fa;
+      padding: .65rem 1rem;
+      text-align: left;
+      font-size: .75rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: #fafbfc; }
+    td { padding: .75rem 1rem; font-size: .875rem; vertical-align: middle; }
+
+    .td-thumb img { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; }
+    .td-thumb .no-img { width: 48px; height: 48px; background: #eee; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #bbb; font-size: .65rem; text-align: center; }
+    .td-title a  { color: var(--text); text-decoration: none; font-weight: 500; }
+    .td-title a:hover { color: var(--blue); }
+    .td-title small { display: block; color: var(--muted); font-size: .75rem; margin-top: 2px; }
+    .td-price { font-weight: 700; font-size: 1rem; white-space: nowrap; }
+    .td-diff  { font-weight: 600; white-space: nowrap; }
+    .up   { color: var(--red); }
+    .down { color: var(--green); }
+    .same { color: var(--muted); font-size: .8rem; }
+    .status-pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: .72rem;
+      font-weight: 600;
+    }
+    .status-active   { background: #d1fae5; color: #065f46; }
+    .status-paused   { background: #fef3c7; color: #92400e; }
+    .status-closed   { background: #fee2e2; color: #991b1b; }
+    .status-unknown  { background: #f3f4f6; color: #6b7280; }
+    td.td-actions { text-align: right; }
+
+    /* ── Empty state ── */
+    .empty {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--muted);
+    }
+    .empty svg { margin-bottom: .75rem; opacity: .3; }
+    .empty p   { font-size: .9rem; }
+
+    /* ── History ── */
+    .section-title {
+      font-size: .85rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      margin-bottom: .75rem;
+    }
+    .history-table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .history-empty { text-align: center; padding: 2rem; color: var(--muted); font-size: .85rem; }
+
+    /* ── Spinner ── */
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid #fff;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed; bottom: 1.5rem; right: 1.5rem;
+      background: #1e293b; color: #fff;
+      padding: .7rem 1.2rem; border-radius: 8px;
+      font-size: .85rem; font-weight: 500;
+      opacity: 0; transition: opacity .2s;
+      pointer-events: none; z-index: 999;
+    }
+    #toast.show { opacity: 1; }
+
+    @media (max-width: 640px) {
+      header { padding: .8rem 1rem; }
+      .add-form { flex-direction: column; }
+      .add-form input { min-width: unset; }
+      td, th { padding: .5rem .6rem; }
+      .td-thumb { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="8" fill="#FFE600"/>
+    <path d="M7 22L11.5 13L16 19L20.5 11L25 22H7Z" fill="#3483FA"/>
+  </svg>
+  <div>
+    <h1>Monitor de Precios</h1>
+    <p>MercadoLibre · Actualización en tiempo real</p>
+  </div>
+</header>
+
+<main>
+
+  <!-- Add form -->
+  <div class="add-card">
+    <h2>Agregar publicación</h2>
+    <div class="add-form">
+      <input id="inp-url"    type="text" placeholder="URL o ID de publicación (ej: MLA1729348221)" />
+      <input id="inp-label"  type="text" placeholder="Nombre interno (opcional)" />
+      <input id="inp-seller" type="text" placeholder="Vendedor (opcional)" />
+      <button class="btn btn-primary" onclick="addItem()">+ Agregar</button>
+    </div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <span id="last-updated">Nunca actualizado</span>
+    </div>
+    <div class="toolbar-right">
+      <button class="btn btn-ghost btn-sm" onclick="exportHistory()">Exportar historial CSV</button>
+      <button class="btn btn-primary btn-sm" id="btn-refresh" onclick="refreshAll()">
+        Actualizar precios
+      </button>
+    </div>
+  </div>
+
+  <!-- Products table -->
+  <div class="table-wrap">
+    <table id="products-table">
+      <thead>
+        <tr>
+          <th></th>
+          <th>Producto</th>
+          <th>Vendedor</th>
+          <th>Precio actual</th>
+          <th>Cambio</th>
+          <th>Estado</th>
+          <th>Últ. revisión</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="products-body">
+        <tr><td colspan="8"><div class="empty">
+          <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2
+                 M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+          </svg>
+          <p>No hay publicaciones. Agregá una arriba.</p>
+        </div></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- History -->
+  <div class="section-title">Historial de cambios</div>
+  <div class="history-table-wrap">
+    <table id="history-table" style="width:100%;border-collapse:collapse">
+      <thead>
+        <tr>
+          <th style="background:#f7f8fa;padding:.6rem 1rem;text-align:left;font-size:.75rem;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #e0e4ea">Fecha</th>
+          <th style="background:#f7f8fa;padding:.6rem 1rem;text-align:left;font-size:.75rem;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #e0e4ea">ID</th>
+          <th style="background:#f7f8fa;padding:.6rem 1rem;text-align:left;font-size:.75rem;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #e0e4ea">Vendedor</th>
+          <th style="background:#f7f8fa;padding:.6rem 1rem;text-align:left;font-size:.75rem;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #e0e4ea">Producto</th>
+          <th style="background:#f7f8fa;padding:.6rem 1rem;text-align:right;font-size:.75rem;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #e0e4ea">Anterior</th>
+          <th style="background:#f7f8fa;padding:.6rem 1rem;text-align:right;font-size:.75rem;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #e0e4ea">Nuevo</th>
+          <th style="background:#f7f8fa;padding:.6rem 1rem;text-align:right;font-size:.75rem;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #e0e4ea">Dif. $</th>
+          <th style="background:#f7f8fa;padding:.6rem 1rem;text-align:right;font-size:.75rem;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #e0e4ea">Dif. %</th>
+        </tr>
+      </thead>
+      <tbody id="history-body">
+        <tr><td colspan="8" class="history-empty">Sin cambios registrados todavía.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</main>
+
+<div id="toast"></div>
+
+<script>
+// ── Storage ──────────────────────────────────────────────────────────────────
+
+const STORAGE_ITEMS   = 'meli_items';
+const STORAGE_PRICES  = 'meli_last_prices';
+const STORAGE_HISTORY = 'meli_history';
+
+function getItems()   { return JSON.parse(localStorage.getItem(STORAGE_ITEMS)   || '[]'); }
+function getPrices()  { return JSON.parse(localStorage.getItem(STORAGE_PRICES)  || '{}'); }
+function getHistory() { return JSON.parse(localStorage.getItem(STORAGE_HISTORY) || '[]'); }
+
+function saveItems(v)   { localStorage.setItem(STORAGE_ITEMS,   JSON.stringify(v)); }
+function savePrices(v)  { localStorage.setItem(STORAGE_PRICES,  JSON.stringify(v)); }
+function saveHistory(v) { localStorage.setItem(STORAGE_HISTORY, JSON.stringify(v)); }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function parseItemId(raw) {
+  raw = raw.trim();
+  // wid=MLA... o item_id:MLA...
+  let m = raw.match(/[?&]wid=(MLA\d+)/i) || raw.match(/item_id:(MLA\d+)/i);
+  if (m) return m[1].toUpperCase();
+  // path termina en _MLAXXX o /MLAXXX
+  m = raw.match(/[_/](MLA\d+)(?:[?#]|$)/i);
+  if (m) return m[1].toUpperCase();
+  // directo
+  m = raw.match(/^(MLA\d+)$/i);
+  if (m) return m[1].toUpperCase();
+  return null;
+}
+
+function fmtPrice(n) {
+  if (n == null) return '—';
+  return '$' + Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function fmtDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString('es-AR') + ' ' + d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+// ── API ───────────────────────────────────────────────────────────────────────
+
+async function fetchItem(id) {
+  const r = await fetch(`https://api.mercadolibre.com/items/${id}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+async function fetchSellerNick(sellerId) {
+  try {
+    const r = await fetch(`https://api.mercadolibre.com/users/${sellerId}`);
+    const d = await r.json();
+    return d.nickname || String(sellerId);
+  } catch { return String(sellerId); }
+}
+
+// ── Add item ──────────────────────────────────────────────────────────────────
+
+async function addItem() {
+  const raw    = document.getElementById('inp-url').value;
+  const label  = document.getElementById('inp-label').value.trim();
+  const seller = document.getElementById('inp-seller').value.trim();
+
+  const id = parseItemId(raw);
+  if (!id) { toast('No se reconoció el ID. Pegá la URL completa o el ID (ej: MLA1729348221)'); return; }
+
+  const items = getItems();
+  if (items.find(i => i.id === id)) { toast('Esa publicación ya está en la lista'); return; }
+
+  items.push({ id, label, seller, addedAt: new Date().toISOString() });
+  saveItems(items);
+
+  document.getElementById('inp-url').value    = '';
+  document.getElementById('inp-label').value  = '';
+  document.getElementById('inp-seller').value = '';
+
+  toast(`${id} agregado. Actualizando precios...`);
+  await refreshAll();
+}
+
+// ── Remove item ───────────────────────────────────────────────────────────────
+
+function removeItem(id) {
+  const items = getItems().filter(i => i.id !== id);
+  saveItems(items);
+  const prices = getPrices();
+  delete prices[id];
+  savePrices(prices);
+  renderTable();
+  toast(`${id} eliminado`);
+}
+
+// ── Refresh ───────────────────────────────────────────────────────────────────
+
+async function refreshAll() {
+  const items = getItems();
+  if (!items.length) return;
+
+  const btn = document.getElementById('btn-refresh');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Actualizando...';
+
+  const lastPrices = getPrices();
+  const history    = getHistory();
+  const now        = new Date().toISOString();
+
+  await Promise.allSettled(items.map(async (item) => {
+    try {
+      const data = await fetchItem(item.id);
+
+      // si no tiene vendedor guardado, intentar traerlo
+      if (!item.seller && data.seller_id) {
+        item.seller = await fetchSellerNick(data.seller_id);
+      }
+      if (!item.label) item.label = '';
+
+      const prev = lastPrices[item.id]?.price ?? null;
+      const curr = data.price;
+
+      // detectar cambio
+      if (prev !== null && curr !== prev) {
+        const diff    = curr - prev;
+        const diffPct = prev ? (diff / prev * 100) : null;
+        history.unshift({
+          date:    now,
+          id:      item.id,
+          seller:  item.seller,
+          product: item.label || data.title,
+          prev,
+          curr,
+          diff:    Math.round(diff * 100) / 100,
+          diffPct: diffPct != null ? Math.round(diffPct * 100) / 100 : null,
+          url:     data.permalink,
+        });
+      }
+
+      lastPrices[item.id] = {
+        price:     curr,
+        title:     data.title,
+        status:    data.status,
+        thumbnail: data.thumbnail,
+        permalink: data.permalink,
+        currency:  data.currency_id,
+        checkedAt: now,
+      };
+    } catch (e) {
+      lastPrices[item.id] = { ...(lastPrices[item.id] || {}), error: true, checkedAt: now };
+    }
+  }));
+
+  saveItems(items);
+  savePrices(lastPrices);
+  saveHistory(history.slice(0, 500));
+
+  renderTable();
+  renderHistory();
+
+  btn.disabled = false;
+  btn.innerHTML = 'Actualizar precios';
+  document.getElementById('last-updated').textContent =
+    'Últ. actualización: ' + fmtDate(now);
+}
+
+// ── Render table ──────────────────────────────────────────────────────────────
+
+function renderTable() {
+  const items  = getItems();
+  const prices = getPrices();
+  const tbody  = document.getElementById('products-body');
+
+  if (!items.length) {
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty">
+      <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2
+             M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+      </svg>
+      <p>No hay publicaciones. Agregá una arriba.</p>
+    </div></td></tr>`;
+    return;
+  }
+
+  // necesitamos el precio anterior para mostrar el diff
+  // lo derivamos del historial
+  const history = getHistory();
+  const prevMap = {};
+  // recorrer historial de más viejo a más nuevo para que quede el último cambio
+  for (const h of [...history].reverse()) {
+    prevMap[h.id] = h.prev;
+  }
+
+  tbody.innerHTML = items.map(item => {
+    const p    = prices[item.id];
+    const curr = p?.price ?? null;
+    const prev = prevMap[item.id] ?? null;
+
+    const thumb = p?.thumbnail
+      ? `<img src="${p.thumbnail}" alt="" loading="lazy"/>`
+      : `<div class="no-img">sin img</div>`;
+
+    const title = p?.title
+      ? `<a href="${p.permalink}" target="_blank" rel="noopener">${p.title}</a>
+         ${item.label ? `<small>${item.label}</small>` : ''}`
+      : `<span style="color:#aaa">${item.id}</span>`;
+
+    const priceStr = p?.error ? '<span style="color:#aaa">error</span>' : fmtPrice(curr);
+
+    let diffStr = '<span class="same">—</span>';
+    if (prev !== null && curr !== null && prev !== curr) {
+      const diff    = curr - prev;
+      const diffPct = prev ? (diff / prev * 100) : 0;
+      const cls     = diff < 0 ? 'down' : 'up';
+      const arrow   = diff < 0 ? '▼' : '▲';
+      diffStr = `<span class="${cls}">${arrow} ${fmtPrice(Math.abs(diff))} (${Math.abs(diffPct).toFixed(1)}%)</span>`;
+    }
+
+    const status = p?.status || 'unknown';
+    const statusCls = status === 'active' ? 'status-active'
+                    : status === 'paused' ? 'status-paused'
+                    : status === 'closed' ? 'status-closed' : 'status-unknown';
+    const statusLabel = status === 'active' ? 'Activa'
+                      : status === 'paused' ? 'Pausada'
+                      : status === 'closed' ? 'Cerrada' : status;
+
+    const checked = p?.checkedAt ? fmtDate(p.checkedAt) : '—';
+
+    return `<tr>
+      <td class="td-thumb">${thumb}</td>
+      <td class="td-title">${title}</td>
+      <td>${item.seller || '<span style="color:#aaa">—</span>'}</td>
+      <td class="td-price">${priceStr}</td>
+      <td class="td-diff">${diffStr}</td>
+      <td><span class="status-pill ${statusCls}">${statusLabel}</span></td>
+      <td style="color:#6b7280;font-size:.8rem">${checked}</td>
+      <td class="td-actions">
+        <button class="btn btn-ghost btn-sm" onclick="removeItem('${item.id}')">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Render history ────────────────────────────────────────────────────────────
+
+function renderHistory() {
+  const history = getHistory();
+  const tbody   = document.getElementById('history-body');
+
+  if (!history.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="history-empty">Sin cambios registrados todavía.</td></tr>';
+    return;
+  }
+
+  const tdStyle = 'padding:.6rem 1rem;border-bottom:1px solid #e0e4ea;font-size:.825rem;';
+  tbody.innerHTML = history.map(h => {
+    const diff    = h.curr - h.prev;
+    const cls     = diff < 0 ? 'down' : 'up';
+    const pct     = h.diffPct != null ? (diff < 0 ? '▼' : '▲') + Math.abs(h.diffPct).toFixed(1) + '%' : '—';
+    return `<tr>
+      <td style="${tdStyle}color:#6b7280">${fmtDate(h.date)}</td>
+      <td style="${tdStyle}font-family:monospace">${h.id}</td>
+      <td style="${tdStyle}">${h.seller || '—'}</td>
+      <td style="${tdStyle}">${h.product?.slice(0,45) || '—'}</td>
+      <td style="${tdStyle}text-align:right">${fmtPrice(h.prev)}</td>
+      <td style="${tdStyle}text-align:right;font-weight:700">${fmtPrice(h.curr)}</td>
+      <td style="${tdStyle}text-align:right" class="${cls}">${diff < 0 ? '' : '+'}${fmtPrice(diff)}</td>
+      <td style="${tdStyle}text-align:right" class="${cls}">${pct}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Export CSV ────────────────────────────────────────────────────────────────
+
+function exportHistory() {
+  const history = getHistory();
+  if (!history.length) { toast('No hay historial para exportar'); return; }
+
+  const headers = ['Fecha','ID','Vendedor','Producto','Precio anterior','Precio nuevo','Diferencia $','Diferencia %','URL'];
+  const rows = history.map(h => [
+    fmtDate(h.date), h.id, h.seller || '', h.product || '',
+    h.prev, h.curr,
+    h.diff, h.diffPct != null ? h.diffPct + '%' : '',
+    h.url || '',
+  ]);
+
+  const csv = [headers, ...rows]
+    .map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+
+  const a    = document.createElement('a');
+  a.href     = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `historial_meli_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  toast('CSV exportado');
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+renderTable();
+renderHistory();
+
+const lastPrices = getPrices();
+const firstKey   = Object.keys(lastPrices)[0];
+if (firstKey) {
+  const last = lastPrices[firstKey].checkedAt;
+  if (last) document.getElementById('last-updated').textContent = 'Últ. actualización: ' + fmtDate(last);
+}
+
+// auto-refresh si hay items
+if (getItems().length) refreshAll();
+</script>
+</body>
+</html>
