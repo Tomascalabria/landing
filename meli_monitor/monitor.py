@@ -7,6 +7,10 @@ Uso:
     python monitor.py               # muestra tabla en consola
     python monitor.py --csv         # exporta a prices_YYYYMMDD_HHMMSS.csv
     python monitor.py --watch 60    # revisa cada 60 segundos y alerta cambios
+
+Variables de entorno para Telegram (opcional):
+    TELEGRAM_TOKEN   Token del bot (de @BotFather)
+    TELEGRAM_CHAT_ID ID del chat donde mandar alertas
 """
 
 import argparse
@@ -19,10 +23,41 @@ from datetime import datetime
 
 import requests
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+except ImportError:
+    pass
+
 MELI_API = "https://api.mercadolibre.com/items"
 BATCH_SIZE = 20  # ML permite hasta 20 IDs por request
 ITEMS_FILE = os.path.join(os.path.dirname(__file__), "items.json")
 
+
+# ── Telegram ──────────────────────────────────────────────────────────────────
+
+def _tg_token() -> str | None:
+    return os.environ.get("TELEGRAM_TOKEN")
+
+def _tg_chat() -> str | None:
+    return os.environ.get("TELEGRAM_CHAT_ID")
+
+def send_telegram(text: str) -> None:
+    token = _tg_token()
+    chat  = _tg_chat()
+    if not token or not chat:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat, "text": text, "parse_mode": "HTML"},
+            timeout=10,
+        )
+    except requests.RequestException:
+        pass  # no interrumpir el monitor si Telegram falla
+
+
+# ── API MercadoLibre ──────────────────────────────────────────────────────────
 
 def load_items(path: str) -> list[dict]:
     with open(path, encoding="utf-8") as f:
@@ -30,7 +65,6 @@ def load_items(path: str) -> list[dict]:
 
 
 def fetch_prices(ids: list[str]) -> dict[str, dict]:
-    """Llama a la API de ML en batches y devuelve un dict {id: data}."""
     results = {}
     for i in range(0, len(ids), BATCH_SIZE):
         batch = ids[i : i + BATCH_SIZE]
@@ -53,6 +87,8 @@ def fetch_prices(ids: list[str]) -> dict[str, dict]:
                 results[batch[entry.get("code", 0) % len(batch)]] = None
     return results
 
+
+# ── Formato ───────────────────────────────────────────────────────────────────
 
 def format_price(amount, currency: str) -> str:
     if amount is None:
@@ -162,10 +198,21 @@ def export_csv(rows: list[dict]) -> str:
     return filename
 
 
+# ── Watch mode ────────────────────────────────────────────────────────────────
+
 def watch(items: list[dict], interval: int) -> None:
-    """Corre en loop, imprime alertas cuando cambia el precio."""
-    print(f"Monitoreando {len(items)} publicaciones cada {interval}s. Ctrl+C para salir.\n")
+    tg_active = bool(_tg_token() and _tg_chat())
+    print(f"Monitoreando {len(items)} publicaciones cada {interval}s.")
+    if tg_active:
+        print("Alertas Telegram: activadas")
+        send_telegram(
+            f"<b>Monitor MeLi iniciado</b>\n"
+            f"Vigilando {len(items)} publicaciones cada {interval}s."
+        )
+    print("Ctrl+C para salir.\n")
+
     last_prices: dict[str, float | None] = {}
+
     while True:
         ids = [i["id"] for i in items]
         try:
@@ -180,7 +227,7 @@ def watch(items: list[dict], interval: int) -> None:
         for r in rows:
             prev = last_prices.get(r["id"], ...)
             curr = r["price"]
-            if prev is ... :
+            if prev is ...:
                 last_prices[r["id"]] = curr
                 continue
             if curr != prev:
@@ -192,6 +239,7 @@ def watch(items: list[dict], interval: int) -> None:
             print(f"\n{'='*60}")
             print(f"[{ts}]  CAMBIOS DETECTADOS")
             print(f"{'='*60}")
+            tg_lines = ["<b>Cambio de precio en MeLi</b>"]
             for r, prev in changed:
                 prev_fmt = format_price(prev, r["currency"])
                 curr_fmt = r["price_fmt"]
@@ -200,11 +248,21 @@ def watch(items: list[dict], interval: int) -> None:
                 print(f"     Vendedor: {r['seller']}")
                 print(f"     Precio:   {prev_fmt}  →  {curr_fmt}")
                 print(f"     URL:      {r['permalink']}")
+                tg_lines.append(
+                    f"\n{arrow} <b>{r['title'][:50]}</b>\n"
+                    f"Vendedor: {r['seller']}\n"
+                    f"Precio: {prev_fmt} → <b>{curr_fmt}</b>\n"
+                    f"<a href=\"{r['permalink']}\">Ver publicación</a>"
+                )
+            if tg_active:
+                send_telegram("\n".join(tg_lines))
         else:
             print(f"[{ts}]  Sin cambios. Próxima revisión en {interval}s.")
 
         time.sleep(interval)
 
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monitor de precios MercadoLibre")
